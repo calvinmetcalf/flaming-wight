@@ -1,0 +1,11 @@
+{
+  "name": "Pouch Demo",
+  "description": "Demmo with pouch.",
+  "launch_path": "/pd/_design/pouch/index.html",
+  "version": "0.0.1",
+  "developer": {
+    "name": "Calvin Metcalf",
+    "url": "http://cwmma.tumblr.com"
+  },
+  "default_locale": "en"
+}
