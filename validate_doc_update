@@ -1,5 +1,7 @@
 (newDoc, oldDoc, userCtx) ->
-  if oldDoc and oldDoc.type and oldDoc.type is "page" and userCtx.roles.indexOf("admin") is -1
-    throw (forbidden: "Only admins may edit this page")
-  else
-    return
+	if oldDoc and oldDoc.type and oldDoc.type is "page" and userCtx.roles.indexOf("admin") is -1
+		throw (forbidden: "Only admins may edit this page")
+	else if !newDoc.title or newDoc.title = ""
+		throw (forbidden: "needs a title")
+	else
+		return
