@@ -376,6 +376,6 @@ $ ()->
 	items.on "remove", (item)->
 		pouch.remove item.id
 ```
-lastly we initilize the stuff, first we set the root, and start the router thing, then set it up so we add changes that are made here to pouchcore
+then we initilize the stuff, first we set the root, and start the router thing, then set it up so we add changes that are made here to pouchcore
 
-and were done checkout [live app](https://calvin.iriscouch.com/backbone/_design/pouch/_rewrite/home)
+and were done checkout [live app](https://calvin.iriscouch.com/backbone/_design/pouch/_rewrite/home) also you'll notice this is a couchapp and we use some of those features, especially the rewrites here. 
