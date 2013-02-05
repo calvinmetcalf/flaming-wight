@@ -1,0 +1,7 @@
+[
+{"from": "/css/*", "to": "/css/*"},	
+{"from": "/js/*", "to": "/js/*"},
+{"from": "/img/*", "to": "/img/*"},
+{"from": "/bb.coffee", "to": "/bb.coffee"},
+{"from": "/*", "to": "/index.html"}
+]

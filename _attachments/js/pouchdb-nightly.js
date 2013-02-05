@@ -1,3 +1,9 @@
+/*PouchDB*/
+
+
+(function() {
+ 
+
 // BEGIN Math.uuid.js
 
 /*!
@@ -194,7 +200,7 @@ var Crypto = {};
       return WordToHexValue;
     };
 
-    //**    function Utf8Encode(string) removed. Aready defined in pidcrypt_utils.js
+    //**	function Utf8Encode(string) removed. Aready defined in pidcrypt_utils.js
 
     var x=Array();
     var k,AA,BB,CC,DD,a,b,c,d;
@@ -543,6 +549,11 @@ Pouch.Errors = {
     status: 500,
     error: 'unknown_error',
     reason: 'Database encountered an unknown error'
+  },
+  INVALID_REQUEST: {
+    status: 400,
+    error: 'invalid_request',
+    reason: 'Request was invalid'
   }
 };
 
@@ -1014,7 +1025,7 @@ var parseDocId = function(id) {
 var isDeleted = function(metadata, rev) {
   if (!metadata || !metadata.deletions) return false;
   if (!rev) {
-    rev = winningRev(metadata);
+    rev = Pouch.merge.winningRev(metadata);
   }
   if (rev.indexOf('-') >= 0) {
     rev = rev.split('-')[1];
@@ -1238,7 +1249,7 @@ var writeCheckpoint = function(src, target, opts, checkpoint, callback) {
 // tree (most edits) win
 // The final sort algorithm is slightly documented in a sidebar here:
 // http://guide.couchdb.org/draft/conflicts.html
-var winningRev = function(metadata) {
+Pouch.merge.winningRev = function(metadata) {
   var deletions = metadata.deletions || {};
   var leafs = [];
 
@@ -2535,7 +2546,7 @@ var IdbPouch = function(opts, callback) {
           return;
         }
         var metadata = result.metadata;
-        var rev = winningRev(metadata);
+        var rev = Pouch.merge.winningRev(metadata);
 
         aresults.push({
           ok: true,
@@ -2732,7 +2743,7 @@ var IdbPouch = function(opts, callback) {
         return;
       }
 
-      var rev = winningRev(metadata);
+      var rev = Pouch.merge.winningRev(metadata);
       var key = opts.rev ? opts.rev : rev;
       var index = txn.objectStore(BY_SEQ_STORE).index('_rev');
 
@@ -2949,12 +2960,12 @@ var IdbPouch = function(opts, callback) {
             id: metadata.id,
             key: metadata.id,
             value: {
-              rev: winningRev(metadata)
+              rev: Pouch.merge.winningRev(metadata)
             }
           };
           if (opts.include_docs) {
             doc.doc = data;
-            doc.doc._rev = winningRev(metadata);
+            doc.doc._rev = Pouch.merge.winningRev(metadata);
             if (opts.conflicts) {
               doc.doc._conflicts = collectConflicts(metadata.rev_tree);
             }
@@ -3111,7 +3122,7 @@ var IdbPouch = function(opts, callback) {
           return cursor['continue']();
         }
 
-        var mainRev = winningRev(metadata);
+        var mainRev = Pouch.merge.winningRev(metadata);
         var index = txn.objectStore(BY_SEQ_STORE).index('_rev');
         index.get(mainRev).onsuccess = function(docevent) {
           var doc = docevent.target.result;
@@ -3543,7 +3554,7 @@ var webSqlPouch = function(opts, callback) {
           return;
         }
         var metadata = result.metadata;
-        var rev = winningRev(metadata);
+        var rev = Pouch.merge.winningRev(metadata);
 
         aresults.push({
           ok: true,
@@ -3620,7 +3631,7 @@ var webSqlPouch = function(opts, callback) {
         var seq = docInfo.metadata.seq = result.insertId;
         delete docInfo.metadata.rev;
 
-        var mainRev = winningRev(docInfo.metadata);
+        var mainRev = Pouch.merge.winningRev(docInfo.metadata);
 
         var sql = isUpdate ?
           'UPDATE ' + DOC_STORE + ' SET seq=?, json=?, winningseq=(SELECT seq FROM ' + BY_SEQ_STORE + ' WHERE rev=?) WHERE id=?' :
@@ -3810,7 +3821,7 @@ var webSqlPouch = function(opts, callback) {
           return;
         }
 
-        var rev = winningRev(metadata);
+        var rev = Pouch.merge.winningRev(metadata);
         var key = opts.rev ? opts.rev : rev;
         var sql = 'SELECT * FROM ' + BY_SEQ_STORE + ' WHERE rev=?';
         tx.executeSql(sql, [key], function(tx, results) {
@@ -3902,11 +3913,11 @@ var webSqlPouch = function(opts, callback) {
             var doc = {
               id: metadata.id,
               key: metadata.id,
-              value: {rev: winningRev(metadata)}
+              value: {rev: Pouch.merge.winningRev(metadata)}
             };
             if (opts.include_docs) {
               doc.doc = data;
-              doc.doc._rev = winningRev(metadata);
+              doc.doc._rev = Pouch.merge.winningRev(metadata);
               if (opts.conflicts) {
                 doc.doc._conflicts = collectConflicts(metadata.rev_tree);
               }
@@ -3973,7 +3984,7 @@ var webSqlPouch = function(opts, callback) {
                 changes: collectLeaves(metadata.rev_tree),
                 doc: JSON.parse(doc.data),
               };
-              change.doc._rev = winningRev(metadata);
+              change.doc._rev = Pouch.merge.winningRev(metadata);
               if (isDeleted(metadata, change.doc._rev)) {
                 change.deleted = true;
               }
@@ -4397,3 +4408,266 @@ var MapReduce = function(db) {
 MapReduce._delete = function() { };
 
 Pouch.plugin('mapreduce', MapReduce);
+
+/*global Pouch: true */
+
+"use strict";
+
+// If we wanted to store incremental views we can do it here by listening
+// to the changes feed (keeping track of our last update_seq between page loads)
+// and storing the result of the map function (possibly using the upcoming
+// extracted adapter functions)
+
+var Spatial = function(db) {
+
+  function viewQuery(fun, options) {
+    if (!options.complete) {
+      return;
+    }
+
+    var results = [];
+    var current = null;
+    var num_started= 0;
+    var completed= false;
+
+    // NOTE vmx 2013-01-27: I wouldn't guarantee that this function is
+    // flawless
+    var calculateBbox = function (geom) {
+      var coords = geom.coordinates;
+      if (geom.type === 'Point') {
+        return [[coords[0], coords[0]], [coords[1], coords[1]]];
+      }
+      if (geom.type === 'GeometryCollection') {
+        coords = geom.geometries.map(function(g) {
+          return calculateBbox(g);
+        });
+        return coords.reduce(function (a, b) {
+          var minX = Math.min(a[0], b[0]);
+          var minY = Math.min(a[1], b[1]);
+          var maxX = Math.max(a[2], b[0]);
+          var maxY = Math.max(a[3], b[1]);
+          return [[minX, maxX], [minY, maxY]];
+        });
+      }
+
+      // Flatten coords as much as possible
+      while (Array.isArray(coords[0][0])) {
+        coords = coords.reduce(function(a, b) {
+          return a.concat(b);
+        });
+      };
+
+      return coords.reduce(function (acc, coord) {
+        // The first element isn't a bbox yet
+        if (acc.length === 1) {
+          acc = [[acc[0], acc[0]], [acc[1], acc[1]]];
+        }
+        var minX = Math.min(acc[0][0], coord[0]);
+        var minY = Math.min(acc[0][1], coord[1]);
+        var maxX = Math.max(acc[1][0], coord[0]);
+        var maxY = Math.max(acc[1][1], coord[1]);
+        return [[minX, maxX], [minY, maxY]];
+      });
+    };
+
+    // Make the key a proper one. If a value is a single point, transform it
+    // to a range. If the first element (or the whole key) is a geometry,
+    // calculate its bounding box.
+    // The geometry is also returned (`null` if there is none).
+    var normalizeKey = function(key) {
+      var newKey = [];
+      var geometry = null;
+
+      // Whole key is one geometry
+      if (isPlainObject(key)) {
+        return {
+          key: calculateBbox(key),
+          geometry: key
+        };
+      }
+
+      if (isPlainObject(key[0])) {
+        newKey = calculateBbox(key[0]);
+        geometry = key[0];
+        key = key.slice(1);
+      }
+
+      for(var i=0; i<key.length; i++) {
+        if(isArray(key[i])) {
+          newKey.push(key[i]);
+        // If only a single point, not a range was emitted
+        } else {
+          newKey.push([key[i], key[i]]);
+        }
+      }
+      return {
+        key: newKey,
+        geometry: geometry
+      };
+    };
+
+    var within = function(key, start_range, end_range) {
+      var start;
+      var end;
+
+      for(var i=0; i<key.length; i++) {
+        start = key[i][0];
+        end = key[i][1];
+        if (
+          // Wildcard at the start
+          ((start_range[i] === null && (start <= end_range[i] || end_range[i] === null))
+           // Start is set
+           || (start <= end_range[i] || end_range[i] === null))
+          &&
+            // Wildcard at the end
+            ((end_range[i] === null && (end >= start_range[i] || start_range[i] === null))
+             // End is set
+             || (end >= start_range[i] || start_range[i] === null))) {
+          continue;
+        } else {
+          return false;
+        }
+      }
+      return true;
+    };
+
+    var emit = function(key, val) {
+      var keyGeom = normalizeKey(key);
+      var viewRow = {
+        id: current.doc._id,
+        key: keyGeom.key,
+        value: val,
+        geometry: keyGeom.geometry
+      };
+
+      // If no range is given, return everything
+      if (options.start_range !== undefined &&
+          options.end_range !== undefined) {
+        if (!within(keyGeom.key, options.start_range, options.end_range)) {
+          return;
+        }
+      }
+
+      num_started++;
+      if (options.include_docs) {
+        //in this special case, join on _id (issue #106)
+        if (val && typeof val === 'object' && val._id){
+          db.get(val._id,
+              function(_, joined_doc){
+                if (joined_doc) {
+                  viewRow.doc = joined_doc;
+                }
+                results.push(viewRow);
+                checkComplete();
+              });
+          return;
+        } else {
+          viewRow.doc = current.doc;
+        }
+      }
+      results.push(viewRow);
+    };
+
+    // ugly way to make sure references to 'emit' in map/reduce bind to the
+    // above emit
+    eval('fun = ' + fun.toString() + ';');
+
+    // exclude  _conflicts key by default
+    // or to use options.conflicts if it's set when called by db.query
+    var conflicts = ('conflicts' in options ? options.conflicts : false);
+
+    // only proceed once all documents are mapped and joined
+    var checkComplete= function() {
+      if (completed && results.length == num_started){
+        return options.complete(null, {rows: results});
+      }
+    }
+
+    db.changes({
+      conflicts: conflicts,
+      include_docs: true,
+      onChange: function(doc) {
+        // Don't index deleted or design documents
+        if (!('deleted' in doc) && doc.id.indexOf('_design/') !== 0) {
+          current = {doc: doc.doc};
+          fun.call(this, doc.doc);
+        }
+      },
+      complete: function() {
+        completed= true;
+        checkComplete();
+      }
+    });
+  }
+
+  function httpQuery(location, opts, callback) {
+
+    // List of parameters to add to the PUT request
+    var params = [];
+
+    // TODO vmx 2013-01-27: Support skip and limit
+
+    if (typeof opts.start_range !== 'undefined') {
+      params.push('start_range=' + encodeURIComponent(JSON.stringify(
+        opts.start_range)));
+    }
+    if (typeof opts.end_range !== 'undefined') {
+      params.push('end_range=' + encodeURIComponent(JSON.stringify(
+        opts.end_range)));
+    }
+    if (typeof opts.key !== 'undefined') {
+      params.push('key=' + encodeURIComponent(JSON.stringify(opts.key)));
+    }
+
+    // Format the list of parameters into a valid URI query string
+    params = params.join('&');
+    params = params === '' ? '' : '?' + params;
+
+    // We are referencing a query defined in the design doc
+    var parts = location.split('/');
+    db.request({
+      method: 'GET',
+      url: '_design/' + parts[0] + '/_spatial/' + parts[1] + params
+    }, callback);
+  }
+
+  function query(fun, opts, callback) {
+    if (typeof opts === 'function') {
+      callback = opts;
+      opts = {};
+    }
+
+    if (callback) {
+      opts.complete = callback;
+    }
+
+    if (typeof fun !== 'string') {
+        var error = extend({reason: 'Querying with a function is not ' +
+         'supported for Spatial Views'}, Pouch.Errors.INVALID_REQUEST);
+      return call(callback, error);
+    }
+
+    if (db.type() === 'http') {
+      return httpQuery(fun, opts, callback);
+    }
+
+    var parts = fun.split('/');
+    db.get('_design/' + parts[0], function(err, doc) {
+      if (err) {
+        if (callback) callback(err);
+        return;
+      }
+      viewQuery(doc.spatial[parts[1]], opts);
+    });
+  }
+
+  return {spatial: query};
+};
+
+// Deletion is a noop since we dont store the results of the view
+Spatial._delete = function() { };
+
+Pouch.plugin('spatial', Spatial);
+
+
+ })(this);
