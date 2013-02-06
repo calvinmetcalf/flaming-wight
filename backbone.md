@@ -379,3 +379,5 @@ $ ()->
 then we initilize the stuff, first we set the root, and start the router thing, then set it up so we add changes that are made here to pouchcore
 
 and were done checkout [live app](https://calvin.iriscouch.com/backbone/_design/pouch/_rewrite/home) also you'll notice this is a couchapp and we use some of those features, especially the rewrites here. 
+
+If you want to checkout some other pouch db demos checkout out the [pouchdb wiki](https://github.com/daleharvey/pouchdb/wiki/Who-or-What-Is-Using-Pouch)
